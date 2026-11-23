@@ -1,0 +1,6 @@
+{
+  "name": "2D 초음속 익형 공력 해석기",
+  "description": "2차원 비점성 초음속 유동에서 다이아몬드 및 사각형 단면 익형의 경사충격파와 Prandtl-Meyer 팽창파를 해석적으로 계산하고 Cl, Cd 및 유동 파라미터를 시각화하는 압축성유동 대시보드",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

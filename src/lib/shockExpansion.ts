@@ -11,16 +11,16 @@ export interface AirfoilVertices {
 }
 
 export interface ParametricShape {
-  upperThicknessRatio: number; // t_u / c (0.01 to 0.25)
-  lowerThicknessRatio: number; // t_l / c (0.01 to 0.25)
-  upperPeakPos: number;        // x_u / c (0.10 to 0.90)
-  lowerPeakPos: number;        // x_l / c (0.10 to 0.90)
+  upperThicknessRatio: number; // t_u / c (0.00 to 0.25)
+  lowerThicknessRatio: number; // t_l / c (-0.22 to 0.25; <= 0 means flat or arched upward)
+  upperPeakPos: number;        // x_u / c (0.08 to 0.92)
+  lowerPeakPos: number;        // x_l / c (0.08 to 0.92)
 }
 
 export interface WedgeAngles {
   upperFrontDeg: number; // eps_1u
   upperRearDeg: number;  // eps_2u
-  lowerFrontDeg: number; // eps_1l
+  lowerFrontDeg: number; // eps_1l (<= 0 means flat or arched upward)
   lowerRearDeg: number;  // eps_2l
 }
 
@@ -62,8 +62,8 @@ export const AIRFOIL_PRESETS: AirfoilPreset[] = [
   },
   {
     id: 'thin-6',
-    nameKo: '초음속 박형 마름모 (6%)',
-    descriptionKo: '저항력 고마하수용 얇은 대칭 마름모 (t/c = 0.06)',
+    nameKo: '박형 마름모 (6%)',
+    descriptionKo: '고마하수용 얇은 대칭 마름모 (t/c = 0.06)',
     shape: { upperThicknessRatio: 0.03, lowerThicknessRatio: 0.03, upperPeakPos: 0.5, lowerPeakPos: 0.5 },
   },
   {
@@ -77,6 +77,18 @@ export const AIRFOIL_PRESETS: AirfoilPreset[] = [
     nameKo: '전방 쐐기형',
     descriptionKo: '최대 두께가 앞전에 가까운 전방 치우침 마름모',
     shape: { upperThicknessRatio: 0.05, lowerThicknessRatio: 0.05, upperPeakPos: 0.28, lowerPeakPos: 0.28 },
+  },
+  {
+    id: 'flat-bottom',
+    nameKo: '하면 평면 (0°)',
+    descriptionKo: '하단 각도 0° · 하면이 코드선과 평행한 삼각형',
+    shape: { upperThicknessRatio: 0.08, lowerThicknessRatio: 0.0, upperPeakPos: 0.5, lowerPeakPos: 0.5 },
+  },
+  {
+    id: 'overlap-crescent',
+    nameKo: '겹친 삼각형 (-4%)',
+    descriptionKo: '하단 각도가 음수여서 같은 밑변의 두 삼각형이 겹쳐진 단면',
+    shape: { upperThicknessRatio: 0.10, lowerThicknessRatio: -0.04, upperPeakPos: 0.5, lowerPeakPos: 0.5 },
   },
 ];
 
@@ -170,18 +182,30 @@ export function parametricToVertices(shape: ParametricShape): AirfoilVertices {
 
 /**
  * Convert WedgeAngles -> AirfoilVertices (V1=(0,0), V3=(1,0))
+ * Supports 0° (flat) and negative lower angles (upward-arched overlapping triangle)
  */
 export function wedgeAnglesToVertices(angles: WedgeAngles): AirfoilVertices {
-  const e1u = toRad(Math.max(0.5, Math.min(45, angles.upperFrontDeg)));
-  const e2u = toRad(Math.max(0.5, Math.min(45, angles.upperRearDeg)));
-  const e1l = toRad(Math.max(0.5, Math.min(45, angles.lowerFrontDeg)));
-  const e2l = toRad(Math.max(0.5, Math.min(45, angles.lowerRearDeg)));
+  let xu = 0.5;
+  let yu = 0;
+  if (Math.abs(angles.upperFrontDeg) > 1e-4 && Math.abs(angles.upperRearDeg) > 1e-4) {
+    const signU = angles.upperFrontDeg >= 0 ? 1 : -1;
+    const e1u = toRad(Math.max(0.1, Math.min(45, Math.abs(angles.upperFrontDeg))));
+    const e2u = toRad(Math.max(0.1, Math.min(45, Math.abs(angles.upperRearDeg))));
+    xu = Math.tan(e2u) / (Math.tan(e1u) + Math.tan(e2u));
+    yu = signU * xu * Math.tan(e1u);
+  }
 
-  const xu = Math.tan(e2u) / (Math.tan(e1u) + Math.tan(e2u));
-  const yu = xu * Math.tan(e1u);
-
-  const xl = Math.tan(e2l) / (Math.tan(e1l) + Math.tan(e2l));
-  const yl = -xl * Math.tan(e1l);
+  let xl = 0.5;
+  let yl = 0;
+  if (Math.abs(angles.lowerFrontDeg) > 1e-4 && Math.abs(angles.lowerRearDeg) > 1e-4) {
+    // Positive lower angle -> downward below chord (yl < 0)
+    // Negative lower angle -> upward above chord (yl > 0, overlapping upper triangle)
+    const signL = angles.lowerFrontDeg >= 0 ? 1 : -1;
+    const e1l = toRad(Math.max(0.1, Math.min(45, Math.abs(angles.lowerFrontDeg))));
+    const e2l = toRad(Math.max(0.1, Math.min(45, Math.abs(angles.lowerRearDeg))));
+    xl = Math.tan(e2l) / (Math.tan(e1l) + Math.tan(e2l));
+    yl = -signL * xl * Math.tan(e1l);
+  }
 
   return {
     v1: { x: 0, y: 0 },
@@ -235,44 +259,57 @@ export function verticesToParametric(v: AirfoilVertices): ParametricShape {
   const p2 = rot(v.v2);
   const p4 = rot(v.v4);
   return {
-    upperThicknessRatio: Math.max(0.005, p2.y),
-    lowerThicknessRatio: Math.max(0.005, -p4.y),
+    upperThicknessRatio: p2.y,
+    lowerThicknessRatio: -p4.y,
     upperPeakPos: Math.min(0.95, Math.max(0.05, p2.x)),
     lowerPeakPos: Math.min(0.95, Math.max(0.05, p4.x)),
   };
 }
 
 /**
- * Validate quadrilateral convexity (clockwise V1 -> V2 -> V3 -> V4)
+ * Validate non-self-intersecting quadrilateral airfoil (allows convex, flat-bottom 0°, flat plate, and concave/overlapping crescent shapes)
  */
 export function validateAirfoilGeometry(v: AirfoilVertices): { valid: boolean; reasonKo?: string; chordLength: number } {
-  const chordVec = { x: v.v3.x - v.v1.x, y: v.v3.y - v.v1.y };
-  const chordLength = Math.hypot(chordVec.x, chordVec.y);
+  const dx = v.v3.x - v.v1.x;
+  const dy = v.v3.y - v.v1.y;
+  const chordLength = Math.hypot(dx, dy);
   if (chordLength < 0.05) {
     return { valid: false, reasonKo: '전연(V1)과 후연(V3) 사이 코드 길이가 너무 짧습니다.', chordLength };
   }
 
-  const pts = [v.v1, v.v2, v.v3, v.v4];
-  // Check strict clockwise convexity: cross product (p[i+1]-p[i]) x (p[i+2]-p[i+1]) < 0
-  for (let i = 0; i < 4; i++) {
-    const a = pts[i];
-    const b = pts[(i + 1) % 4];
-    const c = pts[(i + 2) % 4];
-    const abx = b.x - a.x;
-    const aby = b.y - a.y;
-    const bcx = c.x - b.x;
-    const bcy = c.y - b.y;
-    if (Math.hypot(abx, aby) < 1e-4) {
-      return { valid: false, reasonKo: '인접한 두 꼭짓점이 겹쳐 있습니다.', chordLength };
-    }
-    const cross = abx * bcy - aby * bcx;
-    if (cross >= -1e-6) {
-      return {
-        valid: false,
-        reasonKo: '사각형이 볼록(Convex) 형태가 아니거나 꼭짓점 순서(V1→V2→V3→V4 시계방향)가 어긋났습니다.',
-        chordLength,
-      };
-    }
+  const chordAngle = Math.atan2(dy, dx);
+  const toChord = (p: Point2D): Point2D => {
+    const rx = p.x - v.v1.x;
+    const ry = p.y - v.v1.y;
+    return {
+      x: rx * Math.cos(-chordAngle) - ry * Math.sin(-chordAngle),
+      y: rx * Math.sin(-chordAngle) + ry * Math.cos(-chordAngle),
+    };
+  };
+
+  const p2 = toChord(v.v2);
+  const p4 = toChord(v.v4);
+
+  if (p2.x <= 1e-4 || p2.x >= chordLength - 1e-4 || p4.x <= 1e-4 || p4.x >= chordLength - 1e-4) {
+    return {
+      valid: false,
+      reasonKo: '상·하면 꼭짓점(V2, V4)의 코드 방향 위치는 전연(V1)과 후연(V3) 사이에 있어야 합니다.',
+      chordLength,
+    };
+  }
+
+  const evalPathY = (px: number, py: number, x: number): number =>
+    x <= px ? (x / px) * py : ((chordLength - x) / (chordLength - px)) * py;
+
+  const lowerAtP2 = evalPathY(p4.x, p4.y, p2.x);
+  const upperAtP4 = evalPathY(p2.x, p2.y, p4.x);
+
+  if (p2.y < lowerAtP2 - 1e-6 || upperAtP4 < p4.y - 1e-6) {
+    return {
+      valid: false,
+      reasonKo: '하면 윤곽선(V4)이 상면 윤곽선(V1-V2-V3)과 교차했습니다. 하단 각도(또는 두께)가 상단을 넘지 않도록 조절해 주세요.',
+      chordLength,
+    };
   }
 
   return { valid: true, chordLength };

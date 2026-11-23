@@ -80,7 +80,7 @@ export const WaveDiagram: React.FC<WaveDiagramProps> = ({
         ...rawVertices,
         v2: {
           x: Number(Math.max(0.06, Math.min(0.94, bp.x)).toFixed(3)),
-          y: Number(Math.max(0.015, Math.min(0.35, bp.y)).toFixed(3)),
+          y: Number(Math.max(0, Math.min(0.35, bp.y)).toFixed(3)),
         },
       });
     } else if (draggingKey === 'v4') {
@@ -88,7 +88,7 @@ export const WaveDiagram: React.FC<WaveDiagramProps> = ({
         ...rawVertices,
         v4: {
           x: Number(Math.max(0.06, Math.min(0.94, bp.x)).toFixed(3)),
-          y: Number(Math.min(-0.015, Math.max(-0.35, bp.y)).toFixed(3)),
+          y: Number(Math.min(0.30, Math.max(-0.35, bp.y)).toFixed(3)),
         },
       });
     } else if (draggingKey === 'v3') {

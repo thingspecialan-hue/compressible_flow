@@ -55,6 +55,14 @@ export default function App() {
     [vertices, machInf, alphaDeg, gamma]
   );
 
+  const airBaseline = useMemo(
+    () =>
+      selectedFluidId !== 'air'
+        ? solveAirfoilShockExpansion(vertices, machInf, alphaDeg, DEFAULT_GAMMA)
+        : null,
+    [selectedFluidId, vertices, machInf, alphaDeg]
+  );
+
   const handleExportCsv = () => {
     const fluid = FLUID_PRESETS.find((f) => f.id === selectedFluidId);
     const lines: string[] = [
@@ -196,12 +204,26 @@ export default function App() {
               value={aeroResult.isAttached ? aeroResult.cl.toFixed(4) : '—'}
               subtitle="Lift Coefficient"
               accent={aeroResult.isAttached && aeroResult.cl > 0.0001 ? 'blue' : 'neutral'}
+              comparisonNote={
+                airBaseline && airBaseline.isGeometryValid
+                  ? airBaseline.isAttached
+                    ? `공기(γ=1.4): ${airBaseline.cl.toFixed(4)}`
+                    : '공기(γ=1.4): 이탈 충격파'
+                  : undefined
+              }
             />
             <KpiCard
               title="항력계수 Cd"
               value={aeroResult.isAttached ? aeroResult.cd.toFixed(4) : '—'}
               subtitle="Wave Drag Coefficient"
               accent="red"
+              comparisonNote={
+                airBaseline && airBaseline.isGeometryValid
+                  ? airBaseline.isAttached
+                    ? `공기(γ=1.4): ${airBaseline.cd.toFixed(4)}`
+                    : '공기(γ=1.4): 이탈 충격파'
+                  : undefined
+              }
             />
             <KpiCard
               title="양항비 L/D"
@@ -272,9 +294,10 @@ interface KpiCardProps {
   value: string;
   subtitle: string;
   accent: 'blue' | 'red' | 'neutral';
+  comparisonNote?: string;
 }
 
-const KpiCard: React.FC<KpiCardProps> = ({ title, value, subtitle, accent }) => {
+const KpiCard: React.FC<KpiCardProps> = ({ title, value, subtitle, accent, comparisonNote }) => {
   const valColor =
     accent === 'blue'
       ? 'text-blue-800'
@@ -289,6 +312,11 @@ const KpiCard: React.FC<KpiCardProps> = ({ title, value, subtitle, accent }) => 
         {value}
       </div>
       <span className="text-[11px] text-slate-600 mt-1 truncate">{subtitle}</span>
+      {comparisonNote && (
+        <span className="text-[11px] font-mono tabular-nums font-medium text-slate-700 mt-1.5 pt-1.5 border-t border-slate-200 truncate">
+          {comparisonNote}
+        </span>
+      )}
     </div>
   );
 };

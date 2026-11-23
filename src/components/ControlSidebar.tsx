@@ -60,8 +60,14 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
   const handleParamChange = (key: keyof ParametricShape, val: number) => {
     const next: ParametricShape = { ...parametric, [key]: val };
     if (symmetricLock) {
-      if (key === 'upperThicknessRatio') next.lowerThicknessRatio = val;
-      if (key === 'lowerThicknessRatio') next.upperThicknessRatio = val;
+      if (key === 'upperThicknessRatio') next.lowerThicknessRatio = Math.max(0, val);
+      if (key === 'lowerThicknessRatio') {
+        if (val <= 0) {
+          onToggleSymmetricLock();
+        } else {
+          next.upperThicknessRatio = val;
+        }
+      }
       if (key === 'upperPeakPos') next.lowerPeakPos = val;
       if (key === 'lowerPeakPos') next.upperPeakPos = val;
     }
@@ -69,13 +75,58 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
   };
 
   const handleWedgeChange = (key: keyof WedgeAngles, val: number) => {
-    const clamped = Math.max(0.5, Math.min(40, val));
+    const isUpper = key === 'upperFrontDeg' || key === 'upperRearDeg';
+    const clamped = isUpper
+      ? Math.max(0, Math.min(35, val))
+      : Math.max(-25, Math.min(35, val));
     const next: WedgeAngles = { ...wedgeAngles, [key]: clamped };
+
+    // Keep front & rear angles on the same side coherent across 0°
+    if (key === 'upperFrontDeg' && clamped === 0) {
+      next.upperRearDeg = 0;
+    } else if (key === 'upperRearDeg' && clamped === 0) {
+      next.upperFrontDeg = 0;
+    } else if (key === 'upperFrontDeg' && clamped > 0 && next.upperRearDeg <= 0) {
+      next.upperRearDeg = clamped;
+    } else if (key === 'upperRearDeg' && clamped > 0 && next.upperFrontDeg <= 0) {
+      next.upperFrontDeg = clamped;
+    }
+
+    if (key === 'lowerFrontDeg') {
+      if (clamped === 0) {
+        next.lowerRearDeg = 0;
+      } else if (clamped < 0 && next.lowerRearDeg >= 0) {
+        next.lowerRearDeg = next.lowerRearDeg === 0 ? clamped : -Math.abs(next.lowerRearDeg);
+      } else if (clamped > 0 && next.lowerRearDeg <= 0) {
+        next.lowerRearDeg = next.lowerRearDeg === 0 ? clamped : Math.abs(next.lowerRearDeg);
+      }
+    } else if (key === 'lowerRearDeg') {
+      if (clamped === 0) {
+        next.lowerFrontDeg = 0;
+      } else if (clamped < 0 && next.lowerFrontDeg >= 0) {
+        next.lowerFrontDeg = next.lowerFrontDeg === 0 ? clamped : -Math.abs(next.lowerFrontDeg);
+      } else if (clamped > 0 && next.lowerFrontDeg <= 0) {
+        next.lowerFrontDeg = next.lowerFrontDeg === 0 ? clamped : Math.abs(next.lowerFrontDeg);
+      }
+    }
+
     if (symmetricLock) {
       if (key === 'upperFrontDeg') next.lowerFrontDeg = clamped;
-      if (key === 'lowerFrontDeg') next.upperFrontDeg = clamped;
       if (key === 'upperRearDeg') next.lowerRearDeg = clamped;
-      if (key === 'lowerRearDeg') next.upperRearDeg = clamped;
+      if (key === 'lowerFrontDeg') {
+        if (clamped <= 0) {
+          onToggleSymmetricLock();
+        } else {
+          next.upperFrontDeg = clamped;
+        }
+      }
+      if (key === 'lowerRearDeg') {
+        if (clamped <= 0) {
+          onToggleSymmetricLock();
+        } else {
+          next.upperRearDeg = clamped;
+        }
+      }
     }
     onChangeVertices(wedgeAnglesToVertices(next));
   };
@@ -306,7 +357,16 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               <button
                 key={preset.id}
                 type="button"
-                onClick={() => onChangeVertices(parametricToVertices(preset.shape))}
+                onClick={() => {
+                  const isSym =
+                    Math.abs(preset.shape.upperThicknessRatio - preset.shape.lowerThicknessRatio) < 1e-6 &&
+                    Math.abs(preset.shape.upperPeakPos - preset.shape.lowerPeakPos) < 1e-6 &&
+                    preset.shape.lowerThicknessRatio > 0;
+                  if (!isSym && symmetricLock) {
+                    onToggleSymmetricLock();
+                  }
+                  onChangeVertices(parametricToVertices(preset.shape));
+                }}
                 className="px-2.5 py-2 text-left text-xs font-medium text-slate-800 bg-slate-50 hover:bg-blue-50 hover:text-blue-900 border border-slate-300 hover:border-blue-400 rounded-lg transition-colors cursor-pointer truncate"
                 title={preset.descriptionKo}
               >
@@ -359,7 +419,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             <ParamSliderRow
               label="상면 두께비 (y₂ / c)"
               value={parametric.upperThicknessRatio}
-              min={0.01}
+              min={0}
               max={0.22}
               step={0.005}
               display={`${(parametric.upperThicknessRatio * 100).toFixed(1)}%`}
@@ -376,9 +436,9 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             />
             <div className="border-t border-slate-200 pt-3 space-y-3.5">
               <ParamSliderRow
-                label="하면 두께비 (|y₄| / c)"
+                label="하면 두께비 (−y₄ / c · 음수=겹침)"
                 value={parametric.lowerThicknessRatio}
-                min={0.01}
+                min={-0.2}
                 max={0.22}
                 step={0.005}
                 display={`${(parametric.lowerThicknessRatio * 100).toFixed(1)}%`}
@@ -395,7 +455,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               />
             </div>
             <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 flex justify-between font-mono tabular-nums">
-              <span>총 두께비 t/c: {((parametric.upperThicknessRatio + parametric.lowerThicknessRatio) * 100).toFixed(1)}%</span>
+              <span>순 두께비 Δy/c: {((parametric.upperThicknessRatio + parametric.lowerThicknessRatio) * 100).toFixed(1)}%</span>
               <span>앞전 반각: {wedgeAngles.upperFrontDeg.toFixed(1)}° / {wedgeAngles.lowerFrontDeg.toFixed(1)}°</span>
             </div>
           </div>
@@ -407,7 +467,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             <ParamSliderRow
               label="상면 앞전 쐐기각 (ε₁u)"
               value={wedgeAngles.upperFrontDeg}
-              min={1}
+              min={0}
               max={30}
               step={0.2}
               display={`${wedgeAngles.upperFrontDeg.toFixed(1)}°`}
@@ -416,7 +476,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             <ParamSliderRow
               label="상면 뒷전 쐐기각 (ε₂u)"
               value={wedgeAngles.upperRearDeg}
-              min={1}
+              min={0}
               max={30}
               step={0.2}
               display={`${wedgeAngles.upperRearDeg.toFixed(1)}°`}
@@ -424,18 +484,18 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             />
             <div className="border-t border-slate-200 pt-3 space-y-3.5">
               <ParamSliderRow
-                label="하면 앞전 쐐기각 (ε₁l)"
+                label="하면 앞전 쐐기각 (ε₁l · ≤0° 겹침)"
                 value={wedgeAngles.lowerFrontDeg}
-                min={1}
+                min={-25}
                 max={30}
                 step={0.2}
                 display={`${wedgeAngles.lowerFrontDeg.toFixed(1)}°`}
                 onChange={(v) => handleWedgeChange('lowerFrontDeg', v)}
               />
               <ParamSliderRow
-                label="하면 뒷전 쐐기각 (ε₂l)"
+                label="하면 뒷전 쐐기각 (ε₂l · ≤0° 겹침)"
                 value={wedgeAngles.lowerRearDeg}
-                min={1}
+                min={-25}
                 max={30}
                 step={0.2}
                 display={`${wedgeAngles.lowerRearDeg.toFixed(1)}°`}
@@ -443,7 +503,7 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               />
             </div>
             <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 flex justify-between font-mono tabular-nums">
-              <span>전연 총 쐐기각: {(wedgeAngles.upperFrontDeg + wedgeAngles.lowerFrontDeg).toFixed(1)}°</span>
+              <span>전연 총 각: {(wedgeAngles.upperFrontDeg + wedgeAngles.lowerFrontDeg).toFixed(1)}°</span>
               <span>후연 총 각: {(wedgeAngles.upperRearDeg + wedgeAngles.lowerRearDeg).toFixed(1)}°</span>
             </div>
           </div>

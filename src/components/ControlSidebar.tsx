@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { RotateCcw, AlertTriangle, Lock, Unlock } from 'lucide-react';
 import {
   AIRFOIL_PRESETS,
@@ -56,6 +56,10 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
   const parametric = verticesToParametric(vertices);
   const wedgeAngles = verticesToWedgeAngles(vertices);
   const activeFluid = FLUID_PRESETS.find((f) => f.id === selectedFluidId);
+
+  const [gammaLimitMsg, setGammaLimitMsg] = useState<string | null>(null);
+  const [machLimitMsg, setMachLimitMsg] = useState<string | null>(null);
+  const [alphaLimitMsg, setAlphaLimitMsg] = useState<string | null>(null);
 
   const handleParamChange = (key: keyof ParametricShape, val: number) => {
     const next: ParametricShape = { ...parametric, [key]: val };
@@ -158,7 +162,12 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
           </div>
           <button
             type="button"
-            onClick={onResetAll}
+            onClick={() => {
+              setGammaLimitMsg(null);
+              setMachLimitMsg(null);
+              setAlphaLimitMsg(null);
+              onResetAll();
+            }}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
             title="기본값으로 초기화"
           >
@@ -180,7 +189,10 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
           <select
             id="fluid-select"
             value={selectedFluidId}
-            onChange={(e) => onSelectFluid(e.target.value)}
+            onChange={(e) => {
+              setGammaLimitMsg(null);
+              onSelectFluid(e.target.value);
+            }}
             className="w-full px-3 py-2 text-sm font-medium text-slate-900 bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-600 focus:border-blue-600 cursor-pointer"
           >
             {FLUID_PRESETS.map((fluid) => (
@@ -202,17 +214,17 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               비열비 γ (Specific Heat Ratio)
             </label>
             <div className="flex items-center gap-1.5">
-              <input
+              <BoundedDraftInput
                 id="gamma-input"
-                type="number"
+                value={gamma}
                 min={1.05}
                 max={1.67}
                 step={0.001}
-                value={Number(gamma.toFixed(3))}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value);
-                  if (!isNaN(v)) onChangeGamma(Math.min(1.67, Math.max(1.05, v)));
-                }}
+                decimals={3}
+                minLabel="1.05"
+                maxLabel="1.67"
+                onCommit={(v) => onChangeGamma(v)}
+                onLimitMessage={setGammaLimitMsg}
                 className="w-20 px-2 py-1 text-right text-sm font-mono tabular-nums font-semibold text-slate-900 bg-slate-50 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-600"
               />
             </div>
@@ -223,7 +235,10 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             max={1.67}
             step={0.001}
             value={gamma}
-            onChange={(e) => onChangeGamma(parseFloat(e.target.value))}
+            onChange={(e) => {
+              setGammaLimitMsg(null);
+              onChangeGamma(parseFloat(e.target.value));
+            }}
             aria-label="비열비 γ 슬라이더"
             className="w-full h-2 bg-slate-200 rounded-lg cursor-pointer"
           />
@@ -232,6 +247,9 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             <span>1.40 (공기)</span>
             <span>1.67 (단원자)</span>
           </div>
+          {gammaLimitMsg && (
+            <p className="text-xs font-medium text-rose-700">{gammaLimitMsg}</p>
+          )}
         </div>
 
         {/* Freestream Mach Number */}
@@ -240,36 +258,42 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             <label htmlFor="mach-input" className="text-xs font-semibold text-slate-800">
               자유류 마하수 M<sub>∞</sub>
             </label>
-            <input
+            <BoundedDraftInput
               id="mach-input"
-              type="number"
+              value={machInf}
               min={1.05}
-              max={8.0}
+              max={50}
               step={0.05}
-              value={Number(machInf.toFixed(2))}
-              onChange={(e) => {
-                const v = parseFloat(e.target.value);
-                if (!isNaN(v)) onChangeMach(Math.min(8.0, Math.max(1.05, v)));
-              }}
+              decimals={2}
+              minLabel="1.05"
+              maxLabel="50"
+              onCommit={(v) => onChangeMach(v)}
+              onLimitMessage={setMachLimitMsg}
               className="w-20 px-2 py-1 text-right text-sm font-mono tabular-nums font-semibold text-slate-900 bg-slate-50 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-600"
             />
           </div>
           <input
             type="range"
             min={1.05}
-            max={6.0}
+            max={10.0}
             step={0.05}
-            value={Math.min(6.0, machInf)}
-            onChange={(e) => onChangeMach(parseFloat(e.target.value))}
+            value={Math.min(10.0, machInf)}
+            onChange={(e) => {
+              setMachLimitMsg(null);
+              onChangeMach(parseFloat(e.target.value));
+            }}
             aria-label="자유류 마하수 M 슬라이더"
             className="w-full h-2 bg-slate-200 rounded-lg cursor-pointer"
           />
           <div className="flex justify-between text-[11px] font-mono tabular-nums text-slate-600">
             <span>M 1.05</span>
-            <span>M 2.50</span>
-            <span>M 4.50</span>
-            <span>M 6.0+</span>
+            <span>M 4.00</span>
+            <span>M 7.00</span>
+            <span>M 10+</span>
           </div>
+          {machLimitMsg && (
+            <p className="text-xs font-medium text-rose-700">{machLimitMsg}</p>
+          )}
         </div>
 
         {/* Angle of Attack (alpha) */}
@@ -281,23 +305,26 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             <div className="flex items-center gap-1.5">
               <button
                 type="button"
-                onClick={() => onChangeAlpha(0)}
+                onClick={() => {
+                  setAlphaLimitMsg(null);
+                  onChangeAlpha(0);
+                }}
                 className="px-2 py-1 text-[11px] font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded transition-colors whitespace-nowrap shrink-0 cursor-pointer"
               >
                 0° 기준
               </button>
               <div className="relative flex items-center">
-                <input
+                <BoundedDraftInput
                   id="alpha-input"
-                  type="number"
-                  min={-25}
-                  max={25}
+                  value={alphaDeg}
+                  min={-90}
+                  max={90}
                   step={0.2}
-                  value={Number(alphaDeg.toFixed(2))}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    if (!isNaN(v)) onChangeAlpha(Math.min(25, Math.max(-25, v)));
-                  }}
+                  decimals={2}
+                  minLabel="-90°"
+                  maxLabel="90°"
+                  onCommit={(v) => onChangeAlpha(v)}
+                  onLimitMessage={setAlphaLimitMsg}
                   className="w-20 pr-5 pl-2 py-1 text-right text-sm font-mono tabular-nums font-semibold text-slate-900 bg-slate-50 border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-600"
                 />
                 <span className="absolute right-1.5 text-xs font-mono text-slate-600 pointer-events-none">°</span>
@@ -310,7 +337,10 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             max={20}
             step={0.2}
             value={Math.max(-20, Math.min(20, alphaDeg))}
-            onChange={(e) => onChangeAlpha(parseFloat(e.target.value))}
+            onChange={(e) => {
+              setAlphaLimitMsg(null);
+              onChangeAlpha(parseFloat(e.target.value));
+            }}
             aria-label="받음각 α 슬라이더"
             className="w-full h-2 bg-slate-200 rounded-lg cursor-pointer"
           />
@@ -321,6 +351,9 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
             <span>+10°</span>
             <span>+20°</span>
           </div>
+          {alphaLimitMsg && (
+            <p className="text-xs font-medium text-rose-700">{alphaLimitMsg}</p>
+          )}
         </div>
       </section>
 
@@ -628,3 +661,116 @@ const VertexCoordRow: React.FC<VertexCoordRowProps> = ({ label, point, onChangeX
     />
   </div>
 );
+
+interface BoundedDraftInputProps {
+  id: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  decimals: number;
+  minLabel: string;
+  maxLabel: string;
+  onCommit: (val: number) => void;
+  onLimitMessage: (msg: string | null) => void;
+  className: string;
+}
+
+const BoundedDraftInput: React.FC<BoundedDraftInputProps> = ({
+  id,
+  value,
+  min,
+  max,
+  step,
+  decimals,
+  minLabel,
+  maxLabel,
+  onCommit,
+  onLimitMessage,
+  className,
+}) => {
+  const formatted = String(Number(value.toFixed(decimals)));
+  const [draft, setDraft] = useState<string>(formatted);
+  const [isFocused, setIsFocused] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isFocused) {
+      setDraft(String(Number(value.toFixed(decimals))));
+    }
+  }, [value, decimals, isFocused]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    setDraft(raw);
+
+    if (raw === '' || raw === '-' || raw === '.' || raw === '-.') {
+      onLimitMessage(null);
+      return;
+    }
+
+    const num = Number(raw);
+    if (isNaN(num) || !isFinite(num)) return;
+
+    if (num > max) {
+      onLimitMessage(`최대값은 ${maxLabel}입니다.`);
+      onCommit(max);
+    } else if (num < min) {
+      onLimitMessage(null);
+    } else {
+      onLimitMessage(null);
+      onCommit(num);
+    }
+  };
+
+  const commitFinal = () => {
+    setIsFocused(false);
+    const trimmed = draft.trim();
+    const num = Number(trimmed);
+    if (trimmed === '' || isNaN(num) || !isFinite(num)) {
+      setDraft(String(Number(value.toFixed(decimals))));
+      onLimitMessage(null);
+      return;
+    }
+    if (num > max) {
+      onCommit(max);
+      setDraft(String(Number(max.toFixed(decimals))));
+      onLimitMessage(`최대값은 ${maxLabel}입니다.`);
+    } else if (num < min) {
+      onCommit(min);
+      setDraft(String(Number(min.toFixed(decimals))));
+      onLimitMessage(`최소값은 ${minLabel}입니다.`);
+    } else {
+      onCommit(num);
+      setDraft(String(Number(num.toFixed(decimals))));
+      onLimitMessage(null);
+    }
+  };
+
+  return (
+    <input
+      id={id}
+      type="text"
+      inputMode="decimal"
+      data-step={step}
+      value={draft}
+      onFocus={() => setIsFocused(true)}
+      onChange={handleChange}
+      onBlur={commitFinal}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          commitFinal();
+          e.currentTarget.blur();
+        } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          const delta = e.key === 'ArrowUp' ? step : -step;
+          const base = isNaN(Number(draft)) || draft.trim() === '' ? value : Number(draft);
+          const next = Math.min(max, Math.max(min, Number((base + delta).toFixed(decimals))));
+          onCommit(next);
+          setDraft(String(next));
+          onLimitMessage(null);
+        }
+      }}
+      className={className}
+    />
+  );
+};

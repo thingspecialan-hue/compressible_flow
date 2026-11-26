@@ -71,6 +71,14 @@ export const SurfaceParamsPanel: React.FC<SurfaceParamsPanelProps> = ({
         />
       </div>
 
+      {/* Bow Shock Detachment Notice */}
+      {result.isGeometryValid && !result.isAttached && (
+        <div className="px-5 py-2.5 bg-rose-50 border-b border-rose-200 text-xs text-rose-900">
+          <span className="font-semibold">Shock-Expansion 해석 한계 초과 (이탈 충격파 발생):</span>{' '}
+          전연 앞에 이탈 충격파가 형성되어 아음속 영역이 연결되므로, 모든 표면의 개별 수치(M<sub>i</sub>, p/p<sub>∞</sub>, C<sub>p</sub>)는 해석 불가로 통일됩니다. (정확한 유동 분포는 2D CFD 수치해석 영역)
+        </div>
+      )}
+
       {/* Surface-by-Surface Detailed Parameter Table */}
       {!result.isGeometryValid ? (
         <div className="p-6 text-center text-sm text-rose-800 bg-rose-50">
@@ -99,7 +107,7 @@ export const SurfaceParamsPanel: React.FC<SurfaceParamsPanelProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-200 text-[13px]">
               {result.surfaces.map((s) => (
-                <SurfaceRow key={s.id} s={s} />
+                <SurfaceRow key={s.id} s={s} isAirfoilAttached={result.isAttached} />
               ))}
             </tbody>
           </table>
@@ -119,21 +127,23 @@ export const SurfaceParamsPanel: React.FC<SurfaceParamsPanelProps> = ({
                 ? 'F3'
                 : 'F4';
 
+            const showCardValid = result.isAttached && s.isValid;
+
             return (
               <div
                 key={`card-${s.id}`}
                 className={`p-3.5 rounded-lg border bg-white ${
-                  !s.isValid ? 'border-rose-300 bg-rose-50/40' : 'border-slate-200'
+                  !showCardValid ? 'border-rose-300 bg-rose-50/40' : 'border-slate-200'
                 }`}
               >
                 <div className="flex items-center justify-between gap-2 mb-1.5">
                   <span className="text-xs font-bold text-slate-900">
                     {fNum} · {s.labelKo}
                   </span>
-                  <WaveStatusText s={s} />
+                  <WaveStatusText s={s} isAirfoilAttached={result.isAttached} />
                 </div>
 
-                {s.isValid ? (
+                {showCardValid ? (
                   <div className="grid grid-cols-3 gap-2 text-xs font-mono tabular-nums text-slate-800 pt-1">
                     <div>
                       <span className="block text-[11px] font-sans text-slate-600">상류→국소 M</span>
@@ -175,7 +185,9 @@ export const SurfaceParamsPanel: React.FC<SurfaceParamsPanelProps> = ({
                   </div>
                 ) : (
                   <p className="text-xs font-medium text-rose-800 mt-1">
-                    {s.errorReasonKo}
+                    {!s.isValid
+                      ? s.errorReasonKo
+                      : '전연 이탈 충격파(Bow Shock) 발생으로 Shock-Expansion 해석 한계를 초과하여 산출하지 않습니다.'}
                   </p>
                 )}
               </div>
@@ -201,7 +213,17 @@ const RefStatCell: React.FC<{ label: string; value: string; sub: string }> = ({
   </div>
 );
 
-const WaveStatusText: React.FC<{ s: SurfaceSolution }> = ({ s }) => {
+const WaveStatusText: React.FC<{ s: SurfaceSolution; isAirfoilAttached: boolean }> = ({
+  s,
+  isAirfoilAttached,
+}) => {
+  if (!isAirfoilAttached) {
+    return (
+      <span className="text-xs font-semibold text-rose-800">
+        {!s.isValid ? `✖ ${s.waveTypeKo}` : '— 이탈 영역 (해석 불가)'}
+      </span>
+    );
+  }
   if (s.waveType === 'shock') {
     return <span className="text-xs font-semibold text-red-700">▲ 경사충격파</span>;
   }
@@ -214,7 +236,10 @@ const WaveStatusText: React.FC<{ s: SurfaceSolution }> = ({ s }) => {
   return <span className="text-xs font-semibold text-rose-800">✖ {s.waveTypeKo}</span>;
 };
 
-const SurfaceRow: React.FC<{ s: SurfaceSolution }> = ({ s }) => {
+const SurfaceRow: React.FC<{ s: SurfaceSolution; isAirfoilAttached: boolean }> = ({
+  s,
+  isAirfoilAttached,
+}) => {
   const fCode =
     s.id === 'upper_front'
       ? 'F1'
@@ -232,8 +257,10 @@ const SurfaceRow: React.FC<{ s: SurfaceSolution }> = ({ s }) => {
       ? 'V1→V4'
       : 'V4→V3';
 
-  const waveAngleText = !s.isValid
-    ? s.thetaMaxDeg !== null
+  const rowValid = isAirfoilAttached && s.isValid;
+
+  const waveAngleText = !rowValid
+    ? !s.isValid && s.thetaMaxDeg !== null
       ? `θmax ${s.thetaMaxDeg.toFixed(1)}°`
       : '—'
     : s.waveType === 'shock' && s.shockBetaDeg !== null
@@ -245,7 +272,7 @@ const SurfaceRow: React.FC<{ s: SurfaceSolution }> = ({ s }) => {
     : '—';
 
   return (
-    <tr className={!s.isValid ? 'bg-rose-50/60' : 'hover:bg-slate-50/90 transition-colors'}>
+    <tr className={!rowValid ? 'bg-rose-50/60' : 'hover:bg-slate-50/90 transition-colors'}>
       <td className="py-3 px-4 whitespace-nowrap">
         <div className="font-semibold text-slate-900">
           {fCode} · {s.labelKo.split(' (')[0]}
@@ -255,7 +282,7 @@ const SurfaceRow: React.FC<{ s: SurfaceSolution }> = ({ s }) => {
         </div>
       </td>
       <td className="py-3 px-3 whitespace-nowrap">
-        <WaveStatusText s={s} />
+        <WaveStatusText s={s} isAirfoilAttached={isAirfoilAttached} />
       </td>
       <td className="py-3 px-3 text-right font-mono tabular-nums text-slate-800 whitespace-nowrap">
         {s.inclinationDeg >= 0 ? '+' : ''}
@@ -269,24 +296,24 @@ const SurfaceRow: React.FC<{ s: SurfaceSolution }> = ({ s }) => {
         {waveAngleText}
       </td>
       <td className="py-3 px-3 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
-        {s.isValid ? s.downstreamMach.toFixed(3) : '이탈/아음속'}
+        {rowValid ? s.downstreamMach.toFixed(3) : '이탈/불가'}
       </td>
       <td className="py-3 px-3 text-right font-mono tabular-nums font-semibold text-slate-900 whitespace-nowrap">
-        {s.isValid ? s.pressureRatio.toFixed(4) : '—'}
+        {rowValid ? s.pressureRatio.toFixed(4) : '—'}
       </td>
       <td className="py-3 px-3 text-right font-mono tabular-nums text-slate-800 whitespace-nowrap">
-        {s.isValid ? s.tempRatio.toFixed(4) : '—'}
+        {rowValid ? s.tempRatio.toFixed(4) : '—'}
       </td>
       <td
         className={`py-3 px-4 text-right font-mono tabular-nums font-bold whitespace-nowrap ${
-          !s.isValid
+          !rowValid
             ? 'text-rose-800'
             : s.cp >= 0
             ? 'text-red-700'
             : 'text-blue-700'
         }`}
       >
-        {s.isValid ? `${s.cp >= 0 ? '+' : ''}${s.cp.toFixed(4)}` : '—'}
+        {rowValid ? `${s.cp >= 0 ? '+' : ''}${s.cp.toFixed(4)}` : '—'}
       </td>
     </tr>
   );

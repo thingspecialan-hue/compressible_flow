@@ -349,7 +349,7 @@ export const WaveDiagram: React.FC<WaveDiagramProps> = ({
 
   // Render pressure normal vectors along each face
   const renderPressureArrows = (s: SurfaceSolution) => {
-    if (!s.isValid || !showPressureVectors) return null;
+    if (!result.isAttached || !s.isValid || !showPressureVectors) return null;
     const mid: Point2D = {
       x: 0.5 * (s.start.x + s.end.x),
       y: 0.5 * (s.start.y + s.end.y),
@@ -415,6 +415,8 @@ export const WaveDiagram: React.FC<WaveDiagramProps> = ({
         ? 'F3'
         : 'F4';
 
+    const showValidFace = result.isAttached && s.isValid;
+
     return (
       <g key={`ftag-${s.id}`} transform={`translate(${labelPos.x}, ${labelPos.y})`}>
         <rect
@@ -425,7 +427,7 @@ export const WaveDiagram: React.FC<WaveDiagramProps> = ({
           rx={5}
           fill="#FFFFFF"
           fillOpacity={0.95}
-          stroke={s.isValid ? '#CBD5E1' : '#FDA4AF'}
+          stroke={showValidFace ? '#CBD5E1' : '#FDA4AF'}
           strokeWidth={1}
         />
         <text
@@ -433,20 +435,20 @@ export const WaveDiagram: React.FC<WaveDiagramProps> = ({
           y={-3}
           className="text-[10.5px] font-mono font-semibold fill-slate-900"
         >
-          {fNum} · {s.isValid ? `M=${s.downstreamMach.toFixed(2)}` : '이탈/오류'}
+          {fNum} · {showValidFace ? `M=${s.downstreamMach.toFixed(2)}` : '이탈/오류'}
         </text>
         <text
           textAnchor="middle"
           y={10}
           className={`text-[10px] font-mono font-medium ${
-            s.isValid
+            showValidFace
               ? s.cp >= 0
                 ? 'fill-red-700'
                 : 'fill-blue-700'
               : 'fill-rose-700'
           }`}
         >
-          {s.isValid ? `p/p∞=${s.pressureRatio.toFixed(2)}` : 'Detached'}
+          {showValidFace ? `p/p∞=${s.pressureRatio.toFixed(2)}` : 'Detached'}
         </text>
       </g>
     );
@@ -761,10 +763,10 @@ export const WaveDiagram: React.FC<WaveDiagramProps> = ({
           {/* Waves (Shocks & Expansion Fans) */}
           {result.isGeometryValid && (
             <g>
-              {s1 && renderSurfaceWave(s1, 0)}
-              {s2 && s1 && renderSurfaceWave(s2, s1.inclinationDeg)}
-              {s3 && renderSurfaceWave(s3, 0)}
-              {s4 && s3 && renderSurfaceWave(s4, s3.inclinationDeg)}
+              {result.isAttached && s1 && renderSurfaceWave(s1, 0)}
+              {result.isAttached && s2 && s1 && renderSurfaceWave(s2, s1.inclinationDeg)}
+              {result.isAttached && s3 && renderSurfaceWave(s3, 0)}
+              {result.isAttached && s4 && s3 && renderSurfaceWave(s4, s3.inclinationDeg)}
               {renderTrailingWaves()}
               {renderBowShock()}
             </g>
@@ -786,6 +788,8 @@ export const WaveDiagram: React.FC<WaveDiagramProps> = ({
             const pB = toSvg(s.end);
             const edgeColor = !s.isValid
               ? '#BE123C'
+              : !result.isAttached
+              ? '#475569'
               : s.waveType === 'shock'
               ? '#DC2626'
               : s.waveType === 'expansion'

@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Eye, RotateCcw } from 'lucide-react';
 import {
   AirfoilAeroResult,
@@ -6,26 +6,71 @@ import {
   Point2D,
   SurfaceSolution,
   toRad,
+  verticesToParametric,
+  verticesToWedgeAngles,
 } from '../lib/shockExpansion';
+import type { ActiveGeometryPart } from './ControlSidebar';
 
 interface WaveDiagramProps {
   result: AirfoilAeroResult;
   rawVertices: AirfoilVertices;
   onChangeVertices: (v: AirfoilVertices) => void;
+  symmetricLock?: boolean;
+  activeGeometryPart?: ActiveGeometryPart;
+  onChangeActiveGeometryPart?: React.Dispatch<React.SetStateAction<ActiveGeometryPart>>;
 }
 
 export const WaveDiagram: React.FC<WaveDiagramProps> = ({
   result,
   rawVertices,
   onChangeVertices,
+  symmetricLock = false,
+  activeGeometryPart = null,
+  onChangeActiveGeometryPart,
 }) => {
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [draggingKey, setDraggingKey] = useState<'v2' | 'v3' | 'v4' | null>(null);
+  const [hoveredHandleKey, setHoveredHandleKey] = useState<'v2' | 'v3' | 'v4' | null>(null);
+  const lastCanvasPartRef = useRef<'v2' | 'v3' | 'v4' | null>(null);
   const [hoverCoord, setHoverCoord] = useState<Point2D | null>(null);
   const [showAngles, setShowAngles] = useState(true);
   const [showStreamlines, setShowStreamlines] = useState(true);
   const [showPressureVectors, setShowPressureVectors] = useState(true);
   const [showFaceLabels, setShowFaceLabels] = useState(true);
+
+  useEffect(() => {
+    if (!draggingKey) return;
+    const handleUp = () => setDraggingKey(null);
+    window.addEventListener('pointerup', handleUp);
+    window.addEventListener('pointercancel', handleUp);
+    return () => {
+      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener('pointercancel', handleUp);
+    };
+  }, [draggingKey]);
+
+  const canvasActiveHandle = draggingKey ?? hoveredHandleKey;
+
+  useEffect(() => {
+    if (!onChangeActiveGeometryPart) return;
+    const prevCanvasPart = lastCanvasPartRef.current;
+    lastCanvasPartRef.current = canvasActiveHandle;
+    onChangeActiveGeometryPart((prev) => {
+      if (canvasActiveHandle) return canvasActiveHandle;
+      return prev === prevCanvasPart ? null : prev;
+    });
+  }, [canvasActiveHandle, onChangeActiveGeometryPart]);
+
+  useEffect(() => {
+    return () => {
+      const lastPart = lastCanvasPartRef.current;
+      if (lastPart && onChangeActiveGeometryPart) {
+        onChangeActiveGeometryPart((prev) => (prev === lastPart ? null : prev));
+      }
+    };
+  }, [onChangeActiveGeometryPart]);
+
+  const effectiveActivePart = activeGeometryPart ?? canvasActiveHandle;
 
   // SVG coordinate system: viewBox width=960, height=480
   // World domain: x in [-0.45, 1.65] (span 2.10), y in [-0.55, 0.55] (span 1.10)
@@ -75,30 +120,71 @@ export const WaveDiagram: React.FC<WaveDiagramProps> = ({
 
     if (!draggingKey) return;
     const bp = worldToBody(wp);
+
+    const mirrorAcrossChord = (
+      v1: Point2D,
+      v3: Point2D,
+      pt: Point2D,
+      side: 'upper' | 'lower'
+    ): { primary: Point2D; opposite: Point2D } => {
+      const dx = v3.x - v1.x;
+      const dy = v3.y - v1.y;
+      const c = Math.hypot(dx, dy) || 1;
+      const ux = dx / c;
+      const uy = dy / c;
+      const nx = -uy;
+      const ny = ux;
+      const rx = pt.x - v1.x;
+      const ry = pt.y - v1.y;
+      const along = rx * ux + ry * uy;
+      const rawPerp = rx * nx + ry * ny;
+      const absPerp = side === 'upper' ? Math.max(0, rawPerp) : Math.max(0, -rawPerp);
+      const upperPt: Point2D = {
+        x: Number((v1.x + along * ux + absPerp * nx).toFixed(3)),
+        y: Number((v1.y + along * uy + absPerp * ny).toFixed(3)),
+      };
+      const lowerPt: Point2D = {
+        x: Number((v1.x + along * ux - absPerp * nx).toFixed(3)),
+        y: Number((v1.y + along * uy - absPerp * ny).toFixed(3)),
+      };
+      return side === 'upper'
+        ? { primary: upperPt, opposite: lowerPt }
+        : { primary: lowerPt, opposite: upperPt };
+    };
+
     if (draggingKey === 'v2') {
-      onChangeVertices({
-        ...rawVertices,
-        v2: {
-          x: Number(Math.max(0.06, Math.min(0.94, bp.x)).toFixed(3)),
-          y: Number(Math.max(0, Math.min(0.35, bp.y)).toFixed(3)),
-        },
-      });
+      const clampedV2: Point2D = {
+        x: Number(Math.max(0.06, Math.min(0.94, bp.x)).toFixed(3)),
+        y: Number(Math.max(0, Math.min(0.35, bp.y)).toFixed(3)),
+      };
+      if (symmetricLock) {
+        const { primary, opposite } = mirrorAcrossChord(rawVertices.v1, rawVertices.v3, clampedV2, 'upper');
+        onChangeVertices({ ...rawVertices, v2: primary, v4: opposite });
+      } else {
+        onChangeVertices({ ...rawVertices, v2: clampedV2 });
+      }
     } else if (draggingKey === 'v4') {
-      onChangeVertices({
-        ...rawVertices,
-        v4: {
-          x: Number(Math.max(0.06, Math.min(0.94, bp.x)).toFixed(3)),
-          y: Number(Math.min(0.30, Math.max(-0.35, bp.y)).toFixed(3)),
-        },
-      });
+      const clampedV4: Point2D = {
+        x: Number(Math.max(0.06, Math.min(0.94, bp.x)).toFixed(3)),
+        y: Number(Math.min(0.30, Math.max(-0.35, bp.y)).toFixed(3)),
+      };
+      if (symmetricLock) {
+        const { primary, opposite } = mirrorAcrossChord(rawVertices.v1, rawVertices.v3, clampedV4, 'lower');
+        onChangeVertices({ ...rawVertices, v4: primary, v2: opposite });
+      } else {
+        onChangeVertices({ ...rawVertices, v4: clampedV4 });
+      }
     } else if (draggingKey === 'v3') {
-      onChangeVertices({
-        ...rawVertices,
-        v3: {
-          x: Number(Math.max(0.5, Math.min(1.4, bp.x)).toFixed(3)),
-          y: Number(Math.max(-0.25, Math.min(0.25, bp.y)).toFixed(3)),
-        },
-      });
+      const nextV3: Point2D = {
+        x: Number(Math.max(0.5, Math.min(1.4, bp.x)).toFixed(3)),
+        y: Number(Math.max(-0.25, Math.min(0.25, bp.y)).toFixed(3)),
+      };
+      if (symmetricLock) {
+        const { primary, opposite } = mirrorAcrossChord(rawVertices.v1, nextV3, rawVertices.v2, 'upper');
+        onChangeVertices({ ...rawVertices, v3: nextV3, v2: primary, v4: opposite });
+      } else {
+        onChangeVertices({ ...rawVertices, v3: nextV3 });
+      }
     }
   };
 
@@ -743,40 +829,292 @@ export const WaveDiagram: React.FC<WaveDiagramProps> = ({
               { key: 'v3', pt: sV3, label: 'V3', dy: -12, dx: 12 },
               { key: 'v4', pt: sV4, label: 'V4', dy: 18, dx: 0 },
             ] as const
-          ).map((h) => (
-            <g
-              key={h.key}
-              className="cursor-grab active:cursor-grabbing"
-              onPointerDown={(e) => {
-                e.stopPropagation();
-                (e.target as Element).setPointerCapture?.(e.pointerId);
-                setDraggingKey(h.key);
-              }}
-            >
-              <circle
-                cx={h.pt.x}
-                cy={h.pt.y}
-                r={12}
-                fill="transparent"
-              />
-              <circle
-                cx={h.pt.x}
-                cy={h.pt.y}
-                r={5.5}
-                fill={draggingKey === h.key ? '#1D4ED8' : '#FFFFFF'}
-                stroke="#0F172A"
-                strokeWidth={2}
-              />
-              <text
-                x={h.pt.x + h.dx}
-                y={h.pt.y + h.dy}
-                textAnchor="middle"
-                className="text-[11px] font-mono font-bold fill-slate-900 pointer-events-none"
+          ).map((h) => {
+            const isHandleActive =
+              draggingKey === h.key ||
+              hoveredHandleKey === h.key ||
+              effectiveActivePart === h.key;
+            return (
+              <g
+                key={h.key}
+                className="cursor-grab active:cursor-grabbing"
+                onPointerEnter={() => setHoveredHandleKey(h.key)}
+                onPointerLeave={() =>
+                  setHoveredHandleKey((prev) => (prev === h.key ? null : prev))
+                }
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  (e.target as Element).setPointerCapture?.(e.pointerId);
+                  setDraggingKey(h.key);
+                }}
               >
-                {h.label}
-              </text>
-            </g>
-          ))}
+                <circle
+                  cx={h.pt.x}
+                  cy={h.pt.y}
+                  r={12}
+                  fill="transparent"
+                />
+                <circle
+                  cx={h.pt.x}
+                  cy={h.pt.y}
+                  r={5.5}
+                  fill={isHandleActive ? '#059669' : '#FFFFFF'}
+                  stroke={isHandleActive ? '#065F46' : '#0F172A'}
+                  strokeWidth={2}
+                />
+                <text
+                  x={h.pt.x + h.dx}
+                  y={h.pt.y + h.dy}
+                  textAnchor="middle"
+                  className={`text-[11px] font-mono font-bold pointer-events-none ${
+                    isHandleActive ? 'fill-emerald-800' : 'fill-slate-900'
+                  }`}
+                >
+                  {h.label}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Active Geometry Part Green Highlight & Live Dimension/Angle Overlay */}
+          {(() => {
+            if (!effectiveActivePart) return null;
+            const GREEN = '#059669';
+            const GREEN_FILL = '#ECFDF5';
+            const GREEN_STROKE = '#10B981';
+
+            const parametric = verticesToParametric(rawVertices);
+            const wedgeAngles = verticesToWedgeAngles(rawVertices);
+
+            // Chord unit vector & upper-normal in rotated world frame
+            const cdx = rv.v3.x - rv.v1.x;
+            const cdy = rv.v3.y - rv.v1.y;
+            const chordLen = Math.hypot(cdx, cdy) || 1;
+            const uChord = { x: cdx / chordLen, y: cdy / chordLen };
+            const uPerp = { x: -uChord.y, y: uChord.x };
+
+            const projectOnChord = (pt: Point2D): Point2D => {
+              const rx = pt.x - rv.v1.x;
+              const ry = pt.y - rv.v1.y;
+              const along = rx * uChord.x + ry * uChord.y;
+              return {
+                x: rv.v1.x + uChord.x * along,
+                y: rv.v1.y + uChord.y * along,
+              };
+            };
+
+            const renderBadge = (cx: number, cy: number, text: string) => {
+              const w = Math.max(88, text.length * 7.2 + 16);
+              return (
+                <g transform={`translate(${cx}, ${cy})`} className="pointer-events-none">
+                  <rect
+                    x={-w / 2}
+                    y={-12}
+                    width={w}
+                    height={22}
+                    rx={5}
+                    fill={GREEN_FILL}
+                    stroke={GREEN}
+                    strokeWidth={1.4}
+                  />
+                  <text
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    y={-1}
+                    className="text-[11.5px] font-mono font-bold fill-emerald-900"
+                  >
+                    {text}
+                  </text>
+                </g>
+              );
+            };
+
+            const renderDimensionLine = (aSvg: Point2D, bSvg: Point2D, label: string, labelOffset: Point2D) => {
+              const dx = bSvg.x - aSvg.x;
+              const dy = bSvg.y - aSvg.y;
+              const len = Math.hypot(dx, dy) || 1;
+              const nx = (-dy / len) * 5;
+              const ny = (dx / len) * 5;
+              const midX = (aSvg.x + bSvg.x) / 2 + labelOffset.x;
+              const midY = (aSvg.y + bSvg.y) / 2 + labelOffset.y;
+              return (
+                <g className="pointer-events-none">
+                  <line x1={aSvg.x} y1={aSvg.y} x2={bSvg.x} y2={bSvg.y} stroke={GREEN} strokeWidth={3} strokeLinecap="round" />
+                  <line x1={aSvg.x - nx} y1={aSvg.y - ny} x2={aSvg.x + nx} y2={aSvg.y + ny} stroke={GREEN} strokeWidth={2} />
+                  <line x1={bSvg.x - nx} y1={bSvg.y - ny} x2={bSvg.x + nx} y2={bSvg.y + ny} stroke={GREEN} strokeWidth={2} />
+                  {renderBadge(midX, midY, label)}
+                </g>
+              );
+            };
+
+            const renderWedgeArc = (
+              originSvg: Point2D,
+              chordRefSvg: Point2D,
+              faceEndSvg: Point2D,
+              label: string
+            ) => {
+              const angChord = Math.atan2(chordRefSvg.y - originSvg.y, chordRefSvg.x - originSvg.x);
+              const angFace = Math.atan2(faceEndSvg.y - originSvg.y, faceEndSvg.x - originSvg.x);
+              const diff = ((angFace - angChord + Math.PI * 3) % (Math.PI * 2)) - Math.PI;
+              const faceLen = Math.hypot(faceEndSvg.x - originSvg.x, faceEndSvg.y - originSvg.y);
+              const r = Math.min(72, Math.max(28, faceLen * 0.45));
+              const sx = originSvg.x + r * Math.cos(angChord);
+              const sy = originSvg.y + r * Math.sin(angChord);
+              const ex = originSvg.x + r * Math.cos(angChord + diff);
+              const ey = originSvg.y + r * Math.sin(angChord + diff);
+              const sweep = diff >= 0 ? 1 : 0;
+              const midAng = angChord + diff * 0.5;
+              const lx = originSvg.x + (r + 42) * Math.cos(midAng);
+              const ly = originSvg.y + (r + 42) * Math.sin(midAng);
+
+              return (
+                <g className="pointer-events-none">
+                  {/* Emphasized chord segment */}
+                  <line
+                    x1={sV1.x}
+                    y1={sV1.y}
+                    x2={sV3.x}
+                    y2={sV3.y}
+                    stroke={GREEN_STROKE}
+                    strokeWidth={1.6}
+                    strokeDasharray="5 3"
+                  />
+                  {/* Emphasized airfoil face */}
+                  <line
+                    x1={originSvg.x}
+                    y1={originSvg.y}
+                    x2={faceEndSvg.x}
+                    y2={faceEndSvg.y}
+                    stroke={GREEN}
+                    strokeWidth={4.2}
+                    strokeLinecap="round"
+                  />
+                  {Math.abs(diff) > 0.005 && (
+                    <path
+                      d={`M ${sx} ${sy} A ${r} ${r} 0 0 ${sweep} ${ex} ${ey}`}
+                      fill="none"
+                      stroke={GREEN}
+                      strokeWidth={2.2}
+                    />
+                  )}
+                  <circle cx={faceEndSvg.x} cy={faceEndSvg.y} r={7.5} fill="none" stroke={GREEN} strokeWidth={2.2} />
+                  {renderBadge(lx, ly, label)}
+                </g>
+              );
+            };
+
+            if (effectiveActivePart === 'upperThickness') {
+              const foot = toSvg(projectOnChord(rv.v2));
+              return (
+                <g>
+                  <line x1={sV1.x} y1={sV1.y} x2={sV3.x} y2={sV3.y} stroke={GREEN_STROKE} strokeWidth={1.4} strokeDasharray="4 3" />
+                  {renderDimensionLine(
+                    foot,
+                    sV2,
+                    `y₂/c = ${(parametric.upperThicknessRatio * 100).toFixed(1)}%`,
+                    { x: uChord.x * 58, y: -uChord.y * 58 - 10 }
+                  )}
+                  <circle cx={sV2.x} cy={sV2.y} r={8} fill="none" stroke={GREEN} strokeWidth={2.4} />
+                </g>
+              );
+            }
+
+            if (effectiveActivePart === 'lowerThickness') {
+              const foot = toSvg(projectOnChord(rv.v4));
+              return (
+                <g>
+                  <line x1={sV1.x} y1={sV1.y} x2={sV3.x} y2={sV3.y} stroke={GREEN_STROKE} strokeWidth={1.4} strokeDasharray="4 3" />
+                  {renderDimensionLine(
+                    foot,
+                    sV4,
+                    `−y₄/c = ${(parametric.lowerThicknessRatio * 100).toFixed(1)}%`,
+                    { x: uChord.x * 64, y: -uChord.y * 64 + (parametric.lowerThicknessRatio >= 0 ? 14 : -14) }
+                  )}
+                  <circle cx={sV4.x} cy={sV4.y} r={8} fill="none" stroke={GREEN} strokeWidth={2.4} />
+                </g>
+              );
+            }
+
+            if (effectiveActivePart === 'upperPeakPos') {
+              const footWorld = projectOnChord(rv.v2);
+              const foot = toSvg(footWorld);
+              return (
+                <g>
+                  <line x1={foot.x} y1={foot.y} x2={sV2.x} y2={sV2.y} stroke={GREEN_STROKE} strokeWidth={1.6} strokeDasharray="4 3" />
+                  {renderDimensionLine(
+                    sV1,
+                    foot,
+                    `x₂/c = ${(parametric.upperPeakPos * 100).toFixed(0)}%`,
+                    { x: -uPerp.x * 26, y: uPerp.y * 26 }
+                  )}
+                  <circle cx={sV2.x} cy={sV2.y} r={8} fill="none" stroke={GREEN} strokeWidth={2.4} />
+                </g>
+              );
+            }
+
+            if (effectiveActivePart === 'lowerPeakPos') {
+              const footWorld = projectOnChord(rv.v4);
+              const foot = toSvg(footWorld);
+              return (
+                <g>
+                  <line x1={foot.x} y1={foot.y} x2={sV4.x} y2={sV4.y} stroke={GREEN_STROKE} strokeWidth={1.6} strokeDasharray="4 3" />
+                  {renderDimensionLine(
+                    sV1,
+                    foot,
+                    `x₄/c = ${(parametric.lowerPeakPos * 100).toFixed(0)}%`,
+                    { x: uPerp.x * 26, y: -uPerp.y * 26 }
+                  )}
+                  <circle cx={sV4.x} cy={sV4.y} r={8} fill="none" stroke={GREEN} strokeWidth={2.4} />
+                </g>
+              );
+            }
+
+            if (effectiveActivePart === 'upperFrontDeg') {
+              return renderWedgeArc(sV1, sV3, sV2, `ε₁u = ${wedgeAngles.upperFrontDeg.toFixed(1)}°`);
+            }
+            if (effectiveActivePart === 'upperRearDeg') {
+              return renderWedgeArc(sV3, sV1, sV2, `ε₂u = ${wedgeAngles.upperRearDeg.toFixed(1)}°`);
+            }
+            if (effectiveActivePart === 'lowerFrontDeg') {
+              return renderWedgeArc(sV1, sV3, sV4, `ε₁l = ${wedgeAngles.lowerFrontDeg.toFixed(1)}°`);
+            }
+            if (effectiveActivePart === 'lowerRearDeg') {
+              return renderWedgeArc(sV3, sV1, sV4, `ε₂l = ${wedgeAngles.lowerRearDeg.toFixed(1)}°`);
+            }
+
+            if (effectiveActivePart === 'v2') {
+              return (
+                <g className="pointer-events-none">
+                  <line x1={sV1.x} y1={sV1.y} x2={sV2.x} y2={sV2.y} stroke={GREEN} strokeWidth={3.8} strokeLinecap="round" />
+                  <line x1={sV2.x} y1={sV2.y} x2={sV3.x} y2={sV3.y} stroke={GREEN} strokeWidth={3.8} strokeLinecap="round" />
+                  <circle cx={sV2.x} cy={sV2.y} r={9} fill="none" stroke={GREEN} strokeWidth={2.6} />
+                  {renderBadge(sV2.x, sV2.y - 32, `V2 (${rawVertices.v2.x.toFixed(3)}, ${rawVertices.v2.y.toFixed(3)})`)}
+                </g>
+              );
+            }
+            if (effectiveActivePart === 'v3') {
+              return (
+                <g className="pointer-events-none">
+                  <line x1={sV2.x} y1={sV2.y} x2={sV3.x} y2={sV3.y} stroke={GREEN} strokeWidth={3.8} strokeLinecap="round" />
+                  <line x1={sV4.x} y1={sV4.y} x2={sV3.x} y2={sV3.y} stroke={GREEN} strokeWidth={3.8} strokeLinecap="round" />
+                  <circle cx={sV3.x} cy={sV3.y} r={9} fill="none" stroke={GREEN} strokeWidth={2.6} />
+                  {renderBadge(sV3.x + 12, sV3.y - 32, `V3 (${rawVertices.v3.x.toFixed(3)}, ${rawVertices.v3.y.toFixed(3)})`)}
+                </g>
+              );
+            }
+            if (effectiveActivePart === 'v4') {
+              return (
+                <g className="pointer-events-none">
+                  <line x1={sV1.x} y1={sV1.y} x2={sV4.x} y2={sV4.y} stroke={GREEN} strokeWidth={3.8} strokeLinecap="round" />
+                  <line x1={sV4.x} y1={sV4.y} x2={sV3.x} y2={sV3.y} stroke={GREEN} strokeWidth={3.8} strokeLinecap="round" />
+                  <circle cx={sV4.x} cy={sV4.y} r={9} fill="none" stroke={GREEN} strokeWidth={2.6} />
+                  {renderBadge(sV4.x, sV4.y + 36, `V4 (${rawVertices.v4.x.toFixed(3)}, ${rawVertices.v4.y.toFixed(3)})`)}
+                </g>
+              );
+            }
+
+            return null;
+          })()}
         </svg>
 
         {/* Bottom-right live coordinate probe */}

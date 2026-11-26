@@ -83,7 +83,12 @@ export const SurfaceParamsPanel: React.FC<SurfaceParamsPanelProps> = ({
               <tr className="bg-slate-100/80 border-b border-slate-300 text-xs font-semibold text-slate-800">
                 <th className="py-3 px-4 whitespace-nowrap">표면 구간</th>
                 <th className="py-3 px-3 whitespace-nowrap">발생 파동 유형</th>
-                <th className="py-3 px-3 text-right whitespace-nowrap">표면 경사각 φ</th>
+                <th
+                  className="py-3 px-3 text-right whitespace-nowrap"
+                  title="자유류 유동(+x축) 기준 각 표면의 경사각 (받음각 α 변화에 따라 변동)"
+                >
+                  표면 경사각 φ <span className="font-normal text-slate-500">(유동기준)</span>
+                </th>
                 <th className="py-3 px-3 text-right whitespace-nowrap">유동 편향각 θ</th>
                 <th className="py-3 px-3 text-right whitespace-nowrap">파동각 (β / μ)</th>
                 <th className="py-3 px-3 text-right whitespace-nowrap">국소 마하수 Mᵢ</th>

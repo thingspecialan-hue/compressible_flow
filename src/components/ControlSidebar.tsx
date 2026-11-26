@@ -14,6 +14,20 @@ import {
 
 export type GeometryEditMode = 'parametric' | 'wedge' | 'vertices';
 
+export type ActiveGeometryPart =
+  | 'upperThickness'
+  | 'upperPeakPos'
+  | 'lowerThickness'
+  | 'lowerPeakPos'
+  | 'upperFrontDeg'
+  | 'upperRearDeg'
+  | 'lowerFrontDeg'
+  | 'lowerRearDeg'
+  | 'v2'
+  | 'v3'
+  | 'v4'
+  | null;
+
 interface ControlSidebarProps {
   selectedFluidId: string;
   onSelectFluid: (fluidId: string) => void;
@@ -31,7 +45,11 @@ interface ControlSidebarProps {
   onToggleSymmetricLock: () => void;
   isGeometryValid: boolean;
   geometryErrorKo?: string;
-  onResetAll: () => void;
+  onResetFlow: () => void;
+  onResetGeometry: () => void;
+  resetSignal?: number;
+  activeGeometryPart: ActiveGeometryPart;
+  onChangeActiveGeometryPart: React.Dispatch<React.SetStateAction<ActiveGeometryPart>>;
 }
 
 export const ControlSidebar: React.FC<ControlSidebarProps> = ({
@@ -51,7 +69,11 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
   onToggleSymmetricLock,
   isGeometryValid,
   geometryErrorKo,
-  onResetAll,
+  onResetFlow,
+  onResetGeometry,
+  resetSignal = 0,
+  activeGeometryPart,
+  onChangeActiveGeometryPart,
 }) => {
   const parametric = verticesToParametric(vertices);
   const wedgeAngles = verticesToWedgeAngles(vertices);
@@ -60,6 +82,21 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
   const [gammaLimitMsg, setGammaLimitMsg] = useState<string | null>(null);
   const [machLimitMsg, setMachLimitMsg] = useState<string | null>(null);
   const [alphaLimitMsg, setAlphaLimitMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (resetSignal > 0) {
+      setGammaLimitMsg(null);
+      setMachLimitMsg(null);
+      setAlphaLimitMsg(null);
+    }
+  }, [resetSignal]);
+
+  const handlePartActive = (part: Exclude<ActiveGeometryPart, null>, active: boolean) => {
+    onChangeActiveGeometryPart((prev) => {
+      if (active) return part;
+      return prev === part ? null : prev;
+    });
+  };
 
   const handleParamChange = (key: keyof ParametricShape, val: number) => {
     const next: ParametricShape = { ...parametric, [key]: val };
@@ -148,6 +185,58 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
         [axis]: rawVal,
       },
     };
+
+    if (symmetricLock) {
+      const dx = next.v3.x - next.v1.x;
+      const dy = next.v3.y - next.v1.y;
+      const c = Math.hypot(dx, dy) || 1;
+      const ux = dx / c;
+      const uy = dy / c;
+      const nx = -uy;
+      const ny = ux;
+
+      if (vertexKey === 'v2') {
+        const rx = next.v2.x - next.v1.x;
+        const ry = next.v2.y - next.v1.y;
+        const along = rx * ux + ry * uy;
+        const perp = Math.max(0, rx * nx + ry * ny);
+        next.v2 = {
+          x: Number((next.v1.x + along * ux + perp * nx).toFixed(4)),
+          y: Number((next.v1.y + along * uy + perp * ny).toFixed(4)),
+        };
+        next.v4 = {
+          x: Number((next.v1.x + along * ux - perp * nx).toFixed(4)),
+          y: Number((next.v1.y + along * uy - perp * ny).toFixed(4)),
+        };
+      } else if (vertexKey === 'v4') {
+        const rx = next.v4.x - next.v1.x;
+        const ry = next.v4.y - next.v1.y;
+        const along = rx * ux + ry * uy;
+        const absPerp = Math.max(0, -(rx * nx + ry * ny));
+        next.v4 = {
+          x: Number((next.v1.x + along * ux - absPerp * nx).toFixed(4)),
+          y: Number((next.v1.y + along * uy - absPerp * ny).toFixed(4)),
+        };
+        next.v2 = {
+          x: Number((next.v1.x + along * ux + absPerp * nx).toFixed(4)),
+          y: Number((next.v1.y + along * uy + absPerp * ny).toFixed(4)),
+        };
+      } else if (vertexKey === 'v3') {
+        const rx = next.v2.x - next.v1.x;
+        const ry = next.v2.y - next.v1.y;
+        const along = rx * ux + ry * uy;
+        const perp = Math.max(0, rx * nx + ry * ny);
+        next.v2 = {
+          x: Number((next.v1.x + along * ux + perp * nx).toFixed(4)),
+          y: Number((next.v1.y + along * uy + perp * ny).toFixed(4)),
+        };
+        next.v4 = {
+          x: Number((next.v1.x + along * ux - perp * nx).toFixed(4)),
+          y: Number((next.v1.y + along * uy - perp * ny).toFixed(4)),
+        };
+      }
+    }
+
     onChangeVertices(next);
   };
 
@@ -166,10 +255,10 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               setGammaLimitMsg(null);
               setMachLimitMsg(null);
               setAlphaLimitMsg(null);
-              onResetAll();
+              onResetFlow();
             }}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-            title="기본값으로 초기화"
+            title="유체 및 유동 조건만 기본값으로 초기화"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>초기화</span>
@@ -359,27 +448,35 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
 
       {/* Section 2: Quadrilateral Airfoil Geometry */}
       <section className="bg-white border border-slate-300 rounded-xl p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-slate-200 pb-3">
-          <div>
-            <h2 className="text-[15px] font-semibold text-slate-900">2. 익형 기하 형상 (사각형 단면)</h2>
-            <p className="text-xs text-slate-600 mt-0.5">전연 V1(0,0) 회전 중심 · 4면 자유 변형</p>
+        <div className="border-b border-slate-200 pb-3 space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-[15px] font-semibold text-slate-900 whitespace-nowrap">2. 익형 기하 형상</h2>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={onResetGeometry}
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                title="익형 기하 형상만 기본값으로 초기화"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>초기화</span>
+              </button>
+              <button
+                type="button"
+                onClick={onToggleSymmetricLock}
+                className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  symmetricLock
+                    ? 'bg-blue-50 text-blue-800 border-blue-300'
+                    : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                }`}
+                title={symmetricLock ? '비대칭 자유 편집으로 전환' : '상하 대칭으로 정렬 및 고정'}
+              >
+                {symmetricLock ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                <span>{symmetricLock ? '대칭 고정' : '비대칭 자유'}</span>
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={onToggleSymmetricLock}
-            disabled={geometryMode === 'vertices'}
-            className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-lg border transition-colors whitespace-nowrap shrink-0 ${
-              geometryMode === 'vertices'
-                ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed'
-                : symmetricLock
-                ? 'bg-blue-50 text-blue-800 border-blue-300 cursor-pointer'
-                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50 cursor-pointer'
-            }`}
-            title="상하 대칭 구속 전환"
-          >
-            {symmetricLock ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-            <span>{symmetricLock ? '대칭 고정' : '비대칭 자유'}</span>
-          </button>
+          <p className="text-xs text-slate-600">사각형 단면 · 전연 V1(0,0) 회전 중심 · 4면 자유 변형</p>
         </div>
 
         {/* Presets */}
@@ -457,6 +554,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               step={0.005}
               display={`${(parametric.upperThicknessRatio * 100).toFixed(1)}%`}
               onChange={(v) => handleParamChange('upperThicknessRatio', v)}
+              isHighlighted={activeGeometryPart === 'upperThickness'}
+              onActiveChange={(active) => handlePartActive('upperThickness', active)}
             />
             <ParamSliderRow
               label="상면 꼭짓점 위치 (x₂ / c)"
@@ -466,6 +565,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               step={0.01}
               display={`${(parametric.upperPeakPos * 100).toFixed(0)}%`}
               onChange={(v) => handleParamChange('upperPeakPos', v)}
+              isHighlighted={activeGeometryPart === 'upperPeakPos'}
+              onActiveChange={(active) => handlePartActive('upperPeakPos', active)}
             />
             <div className="border-t border-slate-200 pt-3 space-y-3.5">
               <ParamSliderRow
@@ -476,6 +577,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
                 step={0.005}
                 display={`${(parametric.lowerThicknessRatio * 100).toFixed(1)}%`}
                 onChange={(v) => handleParamChange('lowerThicknessRatio', v)}
+                isHighlighted={activeGeometryPart === 'lowerThickness'}
+                onActiveChange={(active) => handlePartActive('lowerThickness', active)}
               />
               <ParamSliderRow
                 label="하면 꼭짓점 위치 (x₄ / c)"
@@ -485,6 +588,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
                 step={0.01}
                 display={`${(parametric.lowerPeakPos * 100).toFixed(0)}%`}
                 onChange={(v) => handleParamChange('lowerPeakPos', v)}
+                isHighlighted={activeGeometryPart === 'lowerPeakPos'}
+                onActiveChange={(active) => handlePartActive('lowerPeakPos', active)}
               />
             </div>
             <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 flex justify-between font-mono tabular-nums">
@@ -505,6 +610,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               step={0.2}
               display={`${wedgeAngles.upperFrontDeg.toFixed(1)}°`}
               onChange={(v) => handleWedgeChange('upperFrontDeg', v)}
+              isHighlighted={activeGeometryPart === 'upperFrontDeg'}
+              onActiveChange={(active) => handlePartActive('upperFrontDeg', active)}
             />
             <ParamSliderRow
               label="상면 뒷전 쐐기각 (ε₂u)"
@@ -514,6 +621,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               step={0.2}
               display={`${wedgeAngles.upperRearDeg.toFixed(1)}°`}
               onChange={(v) => handleWedgeChange('upperRearDeg', v)}
+              isHighlighted={activeGeometryPart === 'upperRearDeg'}
+              onActiveChange={(active) => handlePartActive('upperRearDeg', active)}
             />
             <div className="border-t border-slate-200 pt-3 space-y-3.5">
               <ParamSliderRow
@@ -524,6 +633,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
                 step={0.2}
                 display={`${wedgeAngles.lowerFrontDeg.toFixed(1)}°`}
                 onChange={(v) => handleWedgeChange('lowerFrontDeg', v)}
+                isHighlighted={activeGeometryPart === 'lowerFrontDeg'}
+                onActiveChange={(active) => handlePartActive('lowerFrontDeg', active)}
               />
               <ParamSliderRow
                 label="하면 뒷전 쐐기각 (ε₂l · ≤0° 겹침)"
@@ -533,6 +644,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
                 step={0.2}
                 display={`${wedgeAngles.lowerRearDeg.toFixed(1)}°`}
                 onChange={(v) => handleWedgeChange('lowerRearDeg', v)}
+                isHighlighted={activeGeometryPart === 'lowerRearDeg'}
+                onActiveChange={(active) => handlePartActive('lowerRearDeg', active)}
               />
             </div>
             <div className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-700 flex justify-between font-mono tabular-nums">
@@ -562,6 +675,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               point={vertices.v2}
               onChangeX={(x) => handleVertexChange('v2', 'x', x)}
               onChangeY={(y) => handleVertexChange('v2', 'y', y)}
+              isHighlighted={activeGeometryPart === 'v2'}
+              onActiveChange={(active) => handlePartActive('v2', active)}
             />
             {/* V3 Trailing Edge */}
             <VertexCoordRow
@@ -569,6 +684,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               point={vertices.v3}
               onChangeX={(x) => handleVertexChange('v3', 'x', x)}
               onChangeY={(y) => handleVertexChange('v3', 'y', y)}
+              isHighlighted={activeGeometryPart === 'v3'}
+              onActiveChange={(active) => handlePartActive('v3', active)}
             />
             {/* V4 Lower Peak */}
             <VertexCoordRow
@@ -576,6 +693,8 @@ export const ControlSidebar: React.FC<ControlSidebarProps> = ({
               point={vertices.v4}
               onChangeX={(x) => handleVertexChange('v4', 'x', x)}
               onChangeY={(y) => handleVertexChange('v4', 'y', y)}
+              isHighlighted={activeGeometryPart === 'v4'}
+              onActiveChange={(active) => handlePartActive('v4', active)}
             />
             <p className="text-xs text-slate-600 pt-1">
               우측 2D 다이어그램에서 V2, V3, V4 핸들을 마우스로 드래그해 직접 수정할 수도 있습니다.
@@ -603,6 +722,8 @@ interface ParamSliderRowProps {
   step: number;
   display: string;
   onChange: (val: number) => void;
+  isHighlighted?: boolean;
+  onActiveChange?: (active: boolean) => void;
 }
 
 const ParamSliderRow: React.FC<ParamSliderRowProps> = ({
@@ -613,54 +734,144 @@ const ParamSliderRow: React.FC<ParamSliderRowProps> = ({
   step,
   display,
   onChange,
-}) => (
-  <div className="space-y-1.5">
-    <div className="flex items-center justify-between text-xs">
-      <span className="font-semibold text-slate-800">{label}</span>
-      <span className="font-mono tabular-nums font-semibold text-slate-900 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-        {display}
-      </span>
+  isHighlighted = false,
+  onActiveChange,
+}) => {
+  const [hovered, setHovered] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    if (!dragging) return;
+    const handleUp = () => setDragging(false);
+    window.addEventListener('pointerup', handleUp);
+    window.addEventListener('pointercancel', handleUp);
+    return () => {
+      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener('pointercancel', handleUp);
+    };
+  }, [dragging]);
+
+  useEffect(() => {
+    onActiveChange?.(hovered || dragging || focused);
+  }, [hovered, dragging, focused]);
+
+  useEffect(() => {
+    return () => {
+      onActiveChange?.(false);
+    };
+  }, []);
+
+  return (
+    <div
+      className={`space-y-1.5 rounded-lg px-2 py-1.5 -mx-2 transition-colors ${
+        isHighlighted ? 'bg-emerald-50/70' : ''
+      }`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <div className="flex items-center justify-between text-xs">
+        <span className={`font-semibold ${isHighlighted ? 'text-emerald-900' : 'text-slate-800'}`}>
+          {label}
+        </span>
+        <span
+          className={`font-mono tabular-nums font-semibold px-2 py-0.5 rounded border transition-colors ${
+            isHighlighted
+              ? 'bg-emerald-100 text-emerald-900 border-emerald-400'
+              : 'bg-slate-100 text-slate-900 border-slate-200'
+          }`}
+        >
+          {display}
+        </span>
+      </div>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={Math.min(max, Math.max(min, value))}
+        onPointerDown={() => setDragging(true)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="w-full h-1.5 bg-slate-200 rounded-lg cursor-pointer"
+      />
     </div>
-    <input
-      type="range"
-      min={min}
-      max={max}
-      step={step}
-      value={Math.min(max, Math.max(min, value))}
-      onChange={(e) => onChange(parseFloat(e.target.value))}
-      className="w-full h-1.5 bg-slate-200 rounded-lg cursor-pointer"
-    />
-  </div>
-);
+  );
+};
 
 interface VertexCoordRowProps {
   label: string;
   point: { x: number; y: number };
   onChangeX: (val: number) => void;
   onChangeY: (val: number) => void;
+  isHighlighted?: boolean;
+  onActiveChange?: (active: boolean) => void;
 }
 
-const VertexCoordRow: React.FC<VertexCoordRowProps> = ({ label, point, onChangeX, onChangeY }) => (
-  <div className="grid grid-cols-[72px_1fr_1fr] gap-2 items-center">
-    <span className="text-xs font-semibold text-slate-800 pl-1">{label}</span>
-    <input
-      type="number"
-      step={0.01}
-      value={Number(point.x.toFixed(3))}
-      onChange={(e) => onChangeX(parseFloat(e.target.value))}
-      aria-label={`${label} x 좌표`}
-      className="w-full px-2 py-1 text-xs font-mono tabular-nums font-semibold text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-600"
-    />
-    <input
-      type="number"
-      step={0.01}
-      value={Number(point.y.toFixed(3))}
-      onChange={(e) => onChangeY(parseFloat(e.target.value))}
-      aria-label={`${label} y 좌표`}
-      className="w-full px-2 py-1 text-xs font-mono tabular-nums font-semibold text-slate-900 bg-white border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-600"
-    />
-  </div>
-);
+const VertexCoordRow: React.FC<VertexCoordRowProps> = ({
+  label,
+  point,
+  onChangeX,
+  onChangeY,
+  isHighlighted = false,
+  onActiveChange,
+}) => {
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+
+  useEffect(() => {
+    onActiveChange?.(hovered || focused);
+  }, [hovered, focused]);
+
+  useEffect(() => {
+    return () => {
+      onActiveChange?.(false);
+    };
+  }, []);
+
+  return (
+    <div
+      className={`grid grid-cols-[72px_1fr_1fr] gap-2 items-center rounded-lg px-1.5 py-1 -mx-1.5 transition-colors ${
+        isHighlighted ? 'bg-emerald-50/80' : ''
+      }`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
+      <span className={`text-xs font-semibold pl-1 ${isHighlighted ? 'text-emerald-900' : 'text-slate-800'}`}>
+        {label}
+      </span>
+      <input
+        type="number"
+        step={0.01}
+        value={Number(point.x.toFixed(3))}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onChange={(e) => onChangeX(parseFloat(e.target.value))}
+        aria-label={`${label} x 좌표`}
+        className={`w-full px-2 py-1 text-xs font-mono tabular-nums font-semibold bg-white border rounded-md focus:outline-none focus:ring-2 ${
+          isHighlighted
+            ? 'text-emerald-950 border-emerald-500 focus:ring-emerald-600'
+            : 'text-slate-900 border-slate-300 focus:ring-blue-600'
+        }`}
+      />
+      <input
+        type="number"
+        step={0.01}
+        value={Number(point.y.toFixed(3))}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        onChange={(e) => onChangeY(parseFloat(e.target.value))}
+        aria-label={`${label} y 좌표`}
+        className={`w-full px-2 py-1 text-xs font-mono tabular-nums font-semibold bg-white border rounded-md focus:outline-none focus:ring-2 ${
+          isHighlighted
+            ? 'text-emerald-950 border-emerald-500 focus:ring-emerald-600'
+            : 'text-slate-900 border-slate-300 focus:ring-blue-600'
+        }`}
+      />
+    </div>
+  );
+};
 
 interface BoundedDraftInputProps {
   id: string;

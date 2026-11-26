@@ -1,9 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Download } from 'lucide-react';
-import { ControlSidebar, GeometryEditMode } from './components/ControlSidebar';
+import { Download, RotateCcw } from 'lucide-react';
+import { ActiveGeometryPart, ControlSidebar, GeometryEditMode } from './components/ControlSidebar';
 import { WaveDiagram } from './components/WaveDiagram';
 import { SurfaceParamsPanel } from './components/SurfaceParamsPanel';
 import { ParametricCharts } from './components/ParametricCharts';
+import { DimensionalForcesPanel } from './components/DimensionalForcesPanel';
 import {
   AIRFOIL_PRESETS,
   AirfoilVertices,
@@ -26,6 +27,8 @@ export default function App() {
   const [vertices, setVertices] = useState<AirfoilVertices>(DEFAULT_VERTICES);
   const [geometryMode, setGeometryMode] = useState<GeometryEditMode>('parametric');
   const [symmetricLock, setSymmetricLock] = useState<boolean>(true);
+  const [activeGeometryPart, setActiveGeometryPart] = useState<ActiveGeometryPart>(null);
+  const [resetSignal, setResetSignal] = useState<number>(0);
 
   const handleSelectFluid = (fluidId: string) => {
     setSelectedFluidId(fluidId);
@@ -41,13 +44,55 @@ export default function App() {
     setSelectedFluidId(matching ? matching.id : 'custom');
   };
 
-  const handleResetAll = () => {
+  const handleToggleSymmetricLock = () => {
+    const next = !symmetricLock;
+    setSymmetricLock(next);
+    if (next) {
+      setVertices((curr) => {
+        const dx = curr.v3.x - curr.v1.x;
+        const dy = curr.v3.y - curr.v1.y;
+        const c = Math.hypot(dx, dy) || 1;
+        const ux = dx / c;
+        const uy = dy / c;
+        const nx = -uy;
+        const ny = ux;
+
+        const rx = curr.v2.x - curr.v1.x;
+        const ry = curr.v2.y - curr.v1.y;
+        const along = rx * ux + ry * uy;
+        const perp = Math.abs(rx * nx + ry * ny);
+
+        return {
+          ...curr,
+          v2: {
+            x: Number((curr.v1.x + along * ux + perp * nx).toFixed(4)),
+            y: Number((curr.v1.y + along * uy + perp * ny).toFixed(4)),
+          },
+          v4: {
+            x: Number((curr.v1.x + along * ux - perp * nx).toFixed(4)),
+            y: Number((curr.v1.y + along * uy - perp * ny).toFixed(4)),
+          },
+        };
+      });
+    }
+  };
+
+  const handleResetFlow = () => {
     setSelectedFluidId(DEFAULT_FLUID_ID);
     setGamma(DEFAULT_GAMMA);
     setMachInf(DEFAULT_MACH);
     setAlphaDeg(DEFAULT_ALPHA);
+  };
+
+  const handleResetGeometry = () => {
     setVertices(DEFAULT_VERTICES);
     setSymmetricLock(true);
+  };
+
+  const handleResetAll = () => {
+    handleResetFlow();
+    handleResetGeometry();
+    setResetSignal((s) => s + 1);
   };
 
   const aeroResult = useMemo(
@@ -158,14 +203,25 @@ export default function App() {
             </a>
           </nav>
 
-          <button
-            type="button"
-            onClick={handleExportCsv}
-            className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span>CSV 내보내기</span>
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleResetAll}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+              title="유체·유동, 익형 형상 및 실차원 입력 전체 초기화"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>전체 초기화</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="inline-flex items-center gap-2 px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>CSV 내보내기</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -186,10 +242,14 @@ export default function App() {
           geometryMode={geometryMode}
           onChangeGeometryMode={setGeometryMode}
           symmetricLock={symmetricLock}
-          onToggleSymmetricLock={() => setSymmetricLock((s) => !s)}
+          onToggleSymmetricLock={handleToggleSymmetricLock}
           isGeometryValid={aeroResult.isGeometryValid}
           geometryErrorKo={aeroResult.geometryErrorKo}
-          onResetAll={handleResetAll}
+          onResetFlow={handleResetFlow}
+          onResetGeometry={handleResetGeometry}
+          resetSignal={resetSignal}
+          activeGeometryPart={activeGeometryPart}
+          onChangeActiveGeometryPart={setActiveGeometryPart}
         />
 
         {/* Right Analytical Dashboard */}
@@ -267,6 +327,9 @@ export default function App() {
             result={aeroResult}
             rawVertices={vertices}
             onChangeVertices={setVertices}
+            symmetricLock={symmetricLock}
+            activeGeometryPart={activeGeometryPart}
+            onChangeActiveGeometryPart={setActiveGeometryPart}
           />
 
           {/* 2. Directly Below Diagram: Detailed Flow & Surface Parameters */}
@@ -283,6 +346,9 @@ export default function App() {
             gamma={gamma}
             isGeometryValid={aeroResult.isGeometryValid}
           />
+
+          {/* 4. Dimensional Lift & Drag Calculator */}
+          <DimensionalForcesPanel result={aeroResult} resetSignal={resetSignal} />
         </div>
       </main>
     </div>
